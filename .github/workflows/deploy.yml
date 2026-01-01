@@ -1,77 +1,79 @@
-name: Deploy Moemail (Manual)
+name: Deploy Moemail (Final Fix)
 
 on:
-  # 这里定义了“勾选框”
   workflow_dispatch:
     inputs:
-      force_install:
-        description: '强制重新安装依赖 (勾选可修复依赖报错)'
+      debug:
+        description: 'Debug mode'
         required: false
-        type: boolean
-        default: true
-      clean_cache:
-        description: '清理构建缓存 (勾选可修复莫名其妙的构建错误)'
-        required: false
-        type: boolean
         default: false
-      debug_log:
-        description: '开启调试日志 (出错时勾选)'
-        required: false
         type: boolean
-        default: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Deploy to Cloudflare
-    
+    name: Deploy
+    permissions:
+      contents: read
+      deployments: write
+
     steps:
-      # 1. 拉取代码
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. 准备环境
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. 安装 pnpm
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
 
-      # 4. 根据勾选框决定是否清理缓存
-      - name: Clean Cache
-        if: ${{ inputs.clean_cache }}
-        run: |
-          echo "正在清理缓存..."
-          rm -rf node_modules
-          rm -rf .next
-
-      # 5. 安装依赖 (总是运行，但会根据情况强制刷新)
       - name: Install Dependencies
-        run: |
-          if [ "${{ inputs.force_install }}" == "true" ]; then
-            echo "正在强制重装依赖..."
-            pnpm install --force
-          else
-            pnpm install
-          fi
+        run: pnpm install
 
-      # 6. 部署到 Cloudflare
-      - name: Deploy
+      # =========================================================
+      # 🛠️ 关键步骤 1：使用 Cloudflare 适配器构建
+      # 这会生成 .vercel/output/static/_worker.js 文件
+      # =========================================================
+      - name: Build with Next-on-Pages
+        run: npx @cloudflare/next-on-pages
+        env:
+          # 构建过程可能需要知道你的域名
+          NEXT_PUBLIC_CUSTOM_DOMAIN: "mail.eics.top"
+
+      # =========================================================
+      # 📝 关键步骤 2：自动生成 wrangler.toml 配置文件
+      # 这一步彻底解决 "Missing entry-point" 和 KV 绑定问题
+      # =========================================================
+      - name: Generate wrangler.toml
+        run: |
+          echo "name = \"moemail\"" > wrangler.toml
+          echo "compatibility_date = \"2024-01-01\"" >> wrangler.toml
+          echo "main = \".vercel/output/static/_worker.js\"" >> wrangler.toml
+          echo "" >> wrangler.toml
+          echo "[[kv_namespaces]]" >> wrangler.toml
+          echo "binding = \"MOE_MAIL\"" >> wrangler.toml
+          echo "id = \"${{ secrets.MOE_MAIL_KV_ID }}\"" >> wrangler.toml
+          
+          # 打印出来检查一下 (为了调试)
+          cat wrangler.toml
+
+      # =========================================================
+      # 🚀 部署
+      # =========================================================
+      - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
           command: deploy
         env:
-          # 必须传递这些环境变量
+          # 运行时环境变量
           MOE_MAIL: ${{ secrets.MOE_MAIL_KV_ID }}
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           AUTH_GITHUB_ID: ${{ secrets.AUTH_GITHUB_ID }}
           AUTH_GITHUB_SECRET: ${{ secrets.AUTH_GITHUB_SECRET }}
-          # 开启调试日志（如果勾选）
-          DEBUG: ${{ inputs.debug_log && '*' || '' }}
+          NEXT_PUBLIC_CUSTOM_DOMAIN: "mail.eics.top"
