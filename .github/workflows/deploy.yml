@@ -1,4 +1,4 @@
-name: Deploy Moemail (Final Fix)
+name: Deploy Moemail (Name Fixed)
 
 on:
   workflow_dispatch:
@@ -34,20 +34,13 @@ jobs:
       - name: Install Dependencies
         run: pnpm install
 
-      # =========================================================
-      # 🛠️ 关键步骤 1：使用 Cloudflare 适配器构建
-      # 这会生成 .vercel/output/static/_worker.js 文件
-      # =========================================================
+      # 1. 构建
       - name: Build with Next-on-Pages
         run: npx @cloudflare/next-on-pages
         env:
-          # 构建过程可能需要知道你的域名
           NEXT_PUBLIC_CUSTOM_DOMAIN: "mail.eics.top"
 
-      # =========================================================
-      # 📝 关键步骤 2：自动生成 wrangler.toml 配置文件
-      # 这一步彻底解决 "Missing entry-point" 和 KV 绑定问题
-      # =========================================================
+      # 2. 生成配置 (使用 KV_NAMESPACE_ID)
       - name: Generate wrangler.toml
         run: |
           echo "name = \"moemail\"" > wrangler.toml
@@ -56,24 +49,24 @@ jobs:
           echo "" >> wrangler.toml
           echo "[[kv_namespaces]]" >> wrangler.toml
           echo "binding = \"MOE_MAIL\"" >> wrangler.toml
-          echo "id = \"${{ secrets.MOE_MAIL_KV_ID }}\"" >> wrangler.toml
-          
-          # 打印出来检查一下 (为了调试)
-          cat wrangler.toml
+          echo "id = \"${{ secrets.KV_NAMESPACE_ID }}\"" >> wrangler.toml
 
-      # =========================================================
-      # 🚀 部署
-      # =========================================================
+      # 3. 部署 (这里修改了变量名以匹配你的截图)
       - name: Deploy to Cloudflare Workers
         uses: cloudflare/wrangler-action@v3
         with:
-          apiToken: ${{ secrets.CF_API_TOKEN }}
-          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          # 👇 关键修改：改成你截图里的名字 CLOUDFLARE_...
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
         env:
-          # 运行时环境变量
-          MOE_MAIL: ${{ secrets.MOE_MAIL_KV_ID }}
+          # 运行时变量
+          MOE_MAIL: ${{ secrets.KV_NAMESPACE_ID }}
+          # 确保这些 Secret 也有值，或者至少存在
           AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           AUTH_GITHUB_ID: ${{ secrets.AUTH_GITHUB_ID }}
           AUTH_GITHUB_SECRET: ${{ secrets.AUTH_GITHUB_SECRET }}
           NEXT_PUBLIC_CUSTOM_DOMAIN: "mail.eics.top"
+          # 这里的 Token 也传一份环境变量，双重保险
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
