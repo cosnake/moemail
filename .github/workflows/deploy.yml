@@ -1,54 +1,77 @@
-name: Deploy Moemail
+name: Deploy Moemail (Manual)
 
 on:
-  push:
-    branches:
-      - main  # 或者是 master，确认一下你的主分支名称
-  workflow_dispatch: # 允许你手动点击按钮触发部署
+  # 这里定义了“勾选框”
+  workflow_dispatch:
+    inputs:
+      force_install:
+        description: '强制重新安装依赖 (勾选可修复依赖报错)'
+        required: false
+        type: boolean
+        default: true
+      clean_cache:
+        description: '清理构建缓存 (勾选可修复莫名其妙的构建错误)'
+        required: false
+        type: boolean
+        default: false
+      debug_log:
+        description: '开启调试日志 (出错时勾选)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    name: Deploy
-    permissions:
-      contents: read
-      deployments: write
-
+    name: Deploy to Cloudflare
+    
     steps:
       # 1. 拉取代码
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. 安装 Node.js
+      # 2. 准备环境
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. 【关键】安装 pnpm (Moemail 指定包管理器)
+      # 3. 安装 pnpm
       - name: Install pnpm
         uses: pnpm/action-setup@v3
         with:
           version: 9
 
-      # 4. 【关键】安装依赖
-      - name: Install Dependencies
-        run: pnpm install
+      # 4. 根据勾选框决定是否清理缓存
+      - name: Clean Cache
+        if: ${{ inputs.clean_cache }}
+        run: |
+          echo "正在清理缓存..."
+          rm -rf node_modules
+          rm -rf .next
 
-      # 5. 部署到 Cloudflare Pages/Workers
-      - name: Deploy to Cloudflare
+      # 5. 安装依赖 (总是运行，但会根据情况强制刷新)
+      - name: Install Dependencies
+        run: |
+          if [ "${{ inputs.force_install }}" == "true" ]; then
+            echo "正在强制重装依赖..."
+            pnpm install --force
+          else
+            pnpm install
+          fi
+
+      # 6. 部署到 Cloudflare
+      - name: Deploy
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          command: deploy # Moemail 通常包含 deploy 脚本，或者直接使用 wrangler deploy
-          # 如果项目是 Pages 项目，可能需要改为: command: pages deploy . --project-name=moemail
+          command: deploy
         env:
-          # 将 GitHub Secrets 传递给部署环境
-          # 必须在这里映射，否则 Worker 读取不到这些变量
-          MOE_MAIL: ${{ secrets.MOE_MAIL_KV_ID }} # 你的 KV 空间 ID
-          NEXTAUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          # 必须传递这些环境变量
+          MOE_MAIL: ${{ secrets.MOE_MAIL_KV_ID }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           AUTH_GITHUB_ID: ${{ secrets.AUTH_GITHUB_ID }}
           AUTH_GITHUB_SECRET: ${{ secrets.AUTH_GITHUB_SECRET }}
-          # 告诉程序你的自定义域名
-          NEXT_PUBLIC_CUSTOM_DOMAIN: "mail.eics.top"
+          # 开启调试日志（如果勾选）
+          DEBUG: ${{ inputs.debug_log && '*' || '' }}
