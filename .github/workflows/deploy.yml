@@ -1,34 +1,54 @@
-name: Deploy Moemail to Cloudflare Workers
+name: Deploy Moemail
 
 on:
   push:
     branches:
-      - main  # 或者是 master，看你的主分支名字
+      - main  # 或者是 master，确认一下你的主分支名称
+  workflow_dispatch: # 允许你手动点击按钮触发部署
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Deploy
+    permissions:
+      contents: read
+      deployments: write
+
     steps:
       # 1. 拉取代码
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. 准备 Node.js 环境
+      # 2. 安装 Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 3. 【关键修复】安装依赖
-      # 这一步会读取 package.json 并安装所有需要的包
-      - name: Install Dependencies
-        run: npm install
+      # 3. 【关键】安装 pnpm (Moemail 指定包管理器)
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
 
-      # 4. 部署到 Cloudflare
-      - name: Deploy to Cloudflare Workers
+      # 4. 【关键】安装依赖
+      - name: Install Dependencies
+        run: pnpm install
+
+      # 5. 部署到 Cloudflare Pages/Workers
+      - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           accountId: ${{ secrets.CF_ACCOUNT_ID }}
-          # 如果你的 wrangler.toml 就在根目录，不需要修改 workingDirectory
+          command: deploy # Moemail 通常包含 deploy 脚本，或者直接使用 wrangler deploy
+          # 如果项目是 Pages 项目，可能需要改为: command: pages deploy . --project-name=moemail
+        env:
+          # 将 GitHub Secrets 传递给部署环境
+          # 必须在这里映射，否则 Worker 读取不到这些变量
+          MOE_MAIL: ${{ secrets.MOE_MAIL_KV_ID }} # 你的 KV 空间 ID
+          NEXTAUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          AUTH_GITHUB_ID: ${{ secrets.AUTH_GITHUB_ID }}
+          AUTH_GITHUB_SECRET: ${{ secrets.AUTH_GITHUB_SECRET }}
+          # 告诉程序你的自定义域名
+          NEXT_PUBLIC_CUSTOM_DOMAIN: "mail.eics.top"
